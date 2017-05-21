@@ -3,10 +3,10 @@
  Author Tobias Koppers @sokra
  */
 import base64VLQ = require('./base64-vlq');
-
-import SourceNode = require('./SourceNode');
 import CodeNode = require('./CodeNode');
 import SourceListMap = require('./SourceListMap');
+
+import SourceNode = require('./SourceNode');
 
 export = function fromStringWithSourceMap(
     code: string,
@@ -14,7 +14,7 @@ export = function fromStringWithSourceMap(
         sources: (string | SourceNode | CodeNode) []
         sourcesContent: string[]
         mappings: string
-    }
+    },
 ) {
     const sources = map.sources;
     const sourcesContent = map.sourcesContent;
@@ -36,7 +36,7 @@ export = function fromStringWithSourceMap(
         if (!mapping) {
             return addCode(line);
         }
-        const mappingObj = { value: 0, rest: mapping };
+        const mappingObj = {value: 0, rest: mapping};
         let lineAdded = false;
         while (mappingObj.rest) lineAdded = processMapping(mappingObj, line, lineAdded) || lineAdded;
         if (!lineAdded) {
@@ -69,7 +69,7 @@ export = function fromStringWithSourceMap(
         const sourceIdx = mapping.value + currentSourceIdx;
         currentSourceIdx = sourceIdx;
 
-        let linePosition
+        let linePosition;
         if (mapping.rest && mapping.rest[0] !== ',') {
             base64VLQ.decode(mapping.rest, mapping);
             linePosition = mapping.value + currentLine;
@@ -89,7 +89,7 @@ export = function fromStringWithSourceMap(
                 line,
                 sources ? sources[sourceIdx] : null,
                 sourcesContent ? sourcesContent[sourceIdx] : null,
-                linePosition
+                linePosition,
             );
             return true;
         }
@@ -100,7 +100,7 @@ export = function fromStringWithSourceMap(
             currentNode.addGeneratedCode(generatedCode);
         }
         else if (currentNode && currentNode instanceof SourceNode && !generatedCode.trim()) {
-            currentNode.generatedCode += generatedCode;
+            currentNode.addGeneratedCode(generatedCode);
             currentSourceNodeLine++;
         }
         else {
@@ -111,7 +111,7 @@ export = function fromStringWithSourceMap(
 
     function addSource(generatedCode, source, originalSource, linePosition) {
         if (currentNode && currentNode instanceof SourceNode && currentNode.source === source && currentSourceNodeLine === linePosition) {
-            currentNode.generatedCode += generatedCode;
+            currentNode.addGeneratedCode(generatedCode);
             currentSourceNodeLine++;
         }
         else {

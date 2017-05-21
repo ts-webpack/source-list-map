@@ -1,21 +1,31 @@
 /*
- MIT License http://www.opensource.org/licenses/mit-license.php
- Author Tobias Koppers @sokra
- */
+	MIT License http://www.opensource.org/licenses/mit-license.php
+	Author Tobias Koppers @sokra
+*/
 import base64VLQ = require('./base64-vlq');
-import { getNumberOfLines } from './helpers'
-import MappingsContext = require('./MappingsContext')
+import MappingsContext = require('./MappingsContext');
+import SingleLineNode = require('./SingleLineNode');
+import { getNumberOfLines, getUnfinishedLine } from './helpers';
+import { BaseNode } from './BaseNode';
 
 const LINE_MAPPING = 'AACA;';
-const LAST_LINE_MAPPING = 'AACA';
 
 class SourceNode {
+    _endsWithNewLine: boolean;
+    _numberOfLines: number;
+
     constructor(
         public generatedCode: string,
         public source: string,
         public originalSource: string,
-        public startingLine = 1
+        public startingLine = 1,
     ) {
+        this.generatedCode = generatedCode;
+        this.originalSource = originalSource;
+        this.source = source;
+        this.startingLine = startingLine || 1;
+        this._numberOfLines = getNumberOfLines(this.generatedCode);
+        this._endsWithNewLine = generatedCode[generatedCode.length - 1] === '\n';
     }
 
     clone() {
@@ -26,28 +36,94 @@ class SourceNode {
         return this.generatedCode;
     }
 
+    addGeneratedCode(code) {
+        this.generatedCode += code;
+        this._numberOfLines += getNumberOfLines(code);
+        this._endsWithNewLine = code[code.length - 1] === '\n';
+    }
+
     getMappings(mappingsContext: MappingsContext) {
-        const lines = getNumberOfLines(this.generatedCode);
+        if (!this.generatedCode) return '';
+        const lines = this._numberOfLines;
         const sourceIdx = mappingsContext.ensureSource(this.source, this.originalSource);
         let mappings = 'A'; // generated column 0
+        if (mappingsContext.unfinishedGeneratedLine) {
+            mappings = `,${base64VLQ.encode(mappingsContext.unfinishedGeneratedLine)}`;
+        }
         mappings += base64VLQ.encode(sourceIdx - mappingsContext.currentSource); // source index
         mappings += base64VLQ.encode(this.startingLine - mappingsContext.currentOriginalLine); // original line index
         mappings += 'A'; // original column 0
-        if (lines !== 0) {
-            mappings += ';';
-        }
         mappingsContext.currentSource = sourceIdx;
-        mappingsContext.currentOriginalLine = (lines || 1) + this.startingLine - 1;
+        mappingsContext.currentOriginalLine = this.startingLine + lines - 1;
+        const unfinishedGeneratedLine = mappingsContext.unfinishedGeneratedLine = getUnfinishedLine(this.generatedCode);
         mappings += Array(lines).join(LINE_MAPPING);
-        if (lines !== 0 && this.generatedCode[this.generatedCode.length - 1] !== '\n') {
-            mappings += LAST_LINE_MAPPING;
+        if (unfinishedGeneratedLine === 0) {
+            mappings += ';';
+        } else {
+            if (lines !== 0) {
+                mappings += LINE_MAPPING;
+            }
             mappingsContext.currentOriginalLine++;
         }
         return mappings;
     }
 
-    mapGeneratedCode(fn: (code: string) => string) {
-        this.generatedCode = fn(this.generatedCode);
+    mapGeneratedCode(fn: (code: string) => string): BaseNode {
+        throw new Error('Cannot map generated code on a SourceMap. Normalize to SingleLineNode first.');
+    }
+
+    getNormalizedNodes() {
+        const results: SingleLineNode[] = [];
+        let currentLine = this.startingLine;
+        const generatedCode = this.generatedCode;
+        let index = 0;
+        const indexEnd = generatedCode.length;
+        while (index < indexEnd) {
+            // get one generated line
+            let nextLine = generatedCode.indexOf('\n', index) + 1;
+            if (nextLine === 0) nextLine = indexEnd;
+            const lineGenerated = generatedCode.substr(index, nextLine - index);
+
+            results.push(new SingleLineNode(lineGenerated, this.source, this.originalSource, currentLine));
+
+            // move cursors
+            index = nextLine;
+            currentLine++;
+        }
+        return results;
+    }
+
+    merge(otherNode) {
+        if (otherNode instanceof SourceNode) {
+            return this.mergeSourceNode(otherNode);
+        } else if (otherNode instanceof SingleLineNode) {
+            return this.mergeSingleLineNode(otherNode);
+        }
+        return false;
+    }
+
+    mergeSourceNode(otherNode) {
+        if (this.source === otherNode.source && this._endsWithNewLine && this.startingLine + this._numberOfLines === otherNode.startingLine) {
+            this.generatedCode += otherNode.generatedCode;
+            this._numberOfLines += otherNode._numberOfLines;
+            this._endsWithNewLine = otherNode._endsWithNewLine;
+            return this;
+        }
+        return false;
+    }
+
+    mergeSingleLineNode(otherNode) {
+        if (this.source === otherNode.source && this._endsWithNewLine && this.startingLine + this._numberOfLines === otherNode.line && otherNode._numberOfLines <= 1) {
+            this.addSingleLineNode(otherNode);
+            return this;
+        }
+        return false;
+    }
+
+    addSingleLineNode(otherNode) {
+        this.generatedCode += otherNode.generatedCode;
+        this._numberOfLines += otherNode._numberOfLines;
+        this._endsWithNewLine = otherNode._endsWithNewLine;
     }
 }
 

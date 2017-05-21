@@ -3,16 +3,15 @@
  Author Tobias Koppers @sokra
  */
 import CodeNode = require('./CodeNode');
-import SourceNode = require('./SourceNode');
 import MappingsContext = require('./MappingsContext');
-
-type NodeAlias = CodeNode | SourceNode
+import SourceNode = require('./SourceNode');
+import { BaseNode } from './BaseNode';
 
 class SourceListMap {
-    children: (SourceNode | CodeNode)[]
+    children: BaseNode[];
 
-    constructor(generatedCode: string | SourceNode | CodeNode | SourceListMap, source: string, originalSource: string)
-    constructor(generatedCode: (SourceNode | CodeNode)[])
+    constructor(generatedCode: string | BaseNode | SourceListMap, source: string, originalSource: string)
+    constructor(generatedCode: BaseNode[])
 
     constructor(generatedCode?, source?, originalSource?) {
         if (Array.isArray(generatedCode)) {
@@ -26,20 +25,20 @@ class SourceListMap {
         }
     }
 
-    add(generatedCode: string | CodeNode | SourceNode | SourceListMap, source?: string, originalSource?: string) {
+    add(generatedCode: string | BaseNode | SourceListMap, source?: string, originalSource?: string) {
         if (typeof generatedCode === 'string') {
             if (source) {
                 this.children.push(new SourceNode(generatedCode, source, originalSource as string));
             }
-            else if (this.children.length > 0 && (<CodeNode>this.children[this.children.length - 1]).addGeneratedCode) {
+            else if (this.children.length > 0 && (<CodeNode>this.children[this.children.length - 1]) instanceof CodeNode) {
                 (<CodeNode>this.children[this.children.length - 1]).addGeneratedCode(generatedCode);
             }
             else {
                 this.children.push(new CodeNode(generatedCode));
             }
         }
-        else if ((<NodeAlias>generatedCode).getMappings && (<NodeAlias>generatedCode).getGeneratedCode) {
-            this.children.push(<NodeAlias>generatedCode);
+        else if ((<BaseNode>generatedCode).getMappings && (<BaseNode>generatedCode).getGeneratedCode) {
+            this.children.push(<BaseNode>generatedCode);
         }
         else if ((<SourceListMap>generatedCode).children) {
             (<SourceListMap>generatedCode).children.forEach(function (sln) {
@@ -51,20 +50,16 @@ class SourceListMap {
         }
     }
 
-    prepend(generatedCode: SourceListMap | SourceNode | CodeNode, source?: string, originalSource?: string) {
+    prepend(generatedCode: SourceListMap | BaseNode, source?: string, originalSource?: string) {
         if (typeof generatedCode === 'string') {
             if (source) {
                 this.children.unshift(new SourceNode(generatedCode, source, originalSource as string));
-            }
-            else if (this.children.length > 0 && this.children[this.children.length - 1].preprendGeneratedCode) {
-                this.children[this.children.length - 1].preprendGeneratedCode(generatedCode);
-            }
-            else {
+            } else {
                 this.children.unshift(new CodeNode(generatedCode));
             }
         }
-        else if ((<NodeAlias>generatedCode).getMappings && (<NodeAlias>generatedCode).getGeneratedCode) {
-            this.children.unshift(<NodeAlias>generatedCode);
+        else if ((<BaseNode>generatedCode).getMappings && (<BaseNode>generatedCode).getGeneratedCode) {
+            this.children.unshift(<BaseNode>generatedCode);
         }
         else if ((<SourceListMap>generatedCode).children) {
             (<SourceListMap>generatedCode).children.slice().reverse().forEach(function (sln) {
@@ -77,26 +72,45 @@ class SourceListMap {
     }
 
     mapGeneratedCode(fn: (code: string) => string) {
-        this.children.forEach((sln: NodeAlias) => {
-            sln.mapGeneratedCode(fn);
+        const normalizedNodes: BaseNode[] = [];
+        this.children.forEach((sln: BaseNode) => {
+            sln.getNormalizedNodes().forEach(function (newNode) {
+                normalizedNodes.push(newNode);
+            });
         });
+        const optimizedNodes: BaseNode[] = [];
+        normalizedNodes.forEach(function (sln) {
+            sln = sln.mapGeneratedCode(fn);
+            if (optimizedNodes.length === 0) {
+                optimizedNodes.push(sln);
+            } else {
+                const last = optimizedNodes[optimizedNodes.length - 1];
+                const mergedNode = last.merge(sln);
+                if (mergedNode) {
+                    optimizedNodes[optimizedNodes.length - 1] = mergedNode;
+                } else {
+                    optimizedNodes.push(sln);
+                }
+            }
+        });
+        return new SourceListMap(optimizedNodes);
     }
 
     toString() {
-        return this.children.map((sln: NodeAlias) =>
-            sln.getGeneratedCode()
+        return this.children.map((sln: BaseNode) =>
+            sln.getGeneratedCode(),
         ).join('');
     }
 
     toStringWithSourceMap(
         options: {
             file: any
-        }
+        },
     ) {
         const mappingsContext = new MappingsContext();
-        const source = this.children.map((sln: NodeAlias) => sln.generatedCode).join('');
-        const mappings = this.children.map((sln: NodeAlias) =>
-                sln.getMappings(mappingsContext)
+        const source = this.children.map((sln: BaseNode) => sln.getGeneratedCode()).join('');
+        const mappings = this.children.map((sln: BaseNode) =>
+                sln.getMappings(mappingsContext),
             )
             .join('');
         return {
@@ -106,8 +120,8 @@ class SourceListMap {
                 file: options && options.file,
                 sources: mappingsContext.sources,
                 sourcesContent: mappingsContext.hasSourceContent ? mappingsContext.sourcesContent : undefined,
-                mappings
-            }
+                mappings,
+            },
         };
     }
 }

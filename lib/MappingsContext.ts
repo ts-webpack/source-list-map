@@ -1,13 +1,14 @@
 /*
- MIT License http://www.opensource.org/licenses/mit-license.php
- Author Tobias Koppers @sokra
- */
+	MIT License http://www.opensource.org/licenses/mit-license.php
+	Author Tobias Koppers @sokra
+*/
 class MappingsContext {
     sources: string[]
     sourcesContent: string[]
     hasSourceContent: boolean
     currentOriginalLine: number
     currentSource: number
+    unfinishedGeneratedLine: false | number
 
     constructor() {
         this.sources = [];
@@ -15,6 +16,7 @@ class MappingsContext {
         this.hasSourceContent = false;
         this.currentOriginalLine = 1;
         this.currentSource = 0;
+        this.unfinishedGeneratedLine = false;
     }
 
     ensureSource(source: string, originalSource: string) {
